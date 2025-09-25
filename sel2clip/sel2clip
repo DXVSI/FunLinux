@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Debounced PRIMARY -> CLIPBOARD (Wayland, KDE Plasma)
+# Автор DXVSI
+
+DELAY_MS="${1:-300}"          # 200–500 мс — пауза после отпускания ЛКМ
+MIN_INTERVAL_MS="${2:-900}"   # минимум между копиями (защита от дублей)
+MAX_BYTES="${3:-262144}"      # максимум 256К
+LOG="${SEL2CLIP_LOG:-}"       # SEL2CLIP_LOG=/tmp/sel2clip.log чтобы логировать
+
+last_hash=""
+last_time=0
+
+log() { [[ -n "$LOG" ]] && printf '%s %s\n' "$(date +'%H:%M:%S')" "$*" >>"$LOG"; }
+
+now_ms() { date +%s%3N; }
+
+pick_text_mime() {
+  local types; types="$(wl-paste -p --list-types 2>/dev/null || true)"
+  for t in "text/plain;charset=utf-8" "text/plain" "UTF8_STRING" "STRING"; do
+    if printf '%s\n' "$types" | grep -Fxq "$t"; then
+      echo "$t"; return 0
+    fi
+  done
+  echo "$types" | awk '/^text\// {print; exit}'
+  [[ "${PIPESTATUS[1]}" -eq 0 ]] || return 1
+}
+
+get_primary_text() {
+  local mime
+  mime="$(pick_text_mime)" || return 1
+  wl-paste -p -t "$mime" --no-newline 2>/dev/null | head -c "$MAX_BYTES"
+}
+
+copy_once_if_stable() {
+  local first second h1 h2 now types
+
+  # Проверяем типы данных в буфере выделения
+  types="$(wl-paste -p --list-types 2>/dev/null || true)"
+
+  # Если есть изображение, не трогаем буфер обмена
+  if echo "$types" | grep -qE '^image/'; then
+    log "image-detected-skip"; return
+  fi
+
+  if ! first="$(get_primary_text)"; then
+    log "no-text-mime"; return
+  fi
+  [[ -z "${first//[[:space:]]/}" ]] && { log "empty-skip"; return; }
+
+  h1="$(printf '%s' "$first" | sha1sum | awk '{print $1}')"
+
+  sleep "$(awk "BEGIN{print $DELAY_MS/1000}")"
+
+  # Повторная проверка на изображения после задержки
+  types="$(wl-paste -p --list-types 2>/dev/null || true)"
+  if echo "$types" | grep -qE '^image/'; then
+    log "image-detected-after-delay-skip"; return
+  fi
+
+  if ! second="$(get_primary_text)"; then
+    log "changed-to-nontext"; return
+  fi
+  h2="$(printf '%s' "$second" | sha1sum | awk '{print $1}')"
+
+  [[ "$h1" != "$h2" ]] && { log "changed-during-delay"; return; }
+
+  now="$(now_ms)"
+  (( now - last_time < MIN_INTERVAL_MS )) && { log "throttled"; return; }
+  [[ "$h2" == "$last_hash" ]] && { log "duplicate"; return; }
+
+  printf '%s' "$second" | wl-copy -n
+  last_hash="$h2"
+  last_time="$now"
+  log "copied"
+}
+
+wl-paste -p --watch sh -c 'echo tick' | while read -r _; do
+  copy_once_if_stable
+done
+BASH
