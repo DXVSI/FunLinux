@@ -112,7 +112,6 @@ function _ai_config_create_default
   "default_model": "gpt-4o-mini",
   "last_used_model": "gpt-4o-mini",
   "max_context_messages": 20,
-  "max_tokens": 1000,
   "temperature": 0.7,
   "show_cost": false,
   "auto_save": true,
@@ -223,19 +222,33 @@ function _ai_api_call
     set -l temperature (_ai_config_get "temperature")
     set -l max_tokens (_ai_config_get "max_tokens")
     test -z "$temperature" && set temperature 0.7
-    test -z "$max_tokens" && set max_tokens 1000
 
-    set -l request_body (echo '{}' | jq \
-        --arg model "$model" \
-        --argjson messages "$messages_json" \
-        --argjson temperature $temperature \
-        --argjson max_tokens $max_tokens \
-        '. + {
-            "model": $model,
-            "messages": $messages,
-            "temperature": $temperature,
-            "max_tokens": $max_tokens
-        }')
+    # Формируем тело запроса
+    # Если max_tokens не задан - не передаём его (модель использует свой максимум)
+    set -l request_body
+    if test -n "$max_tokens"
+        set request_body (echo '{}' | jq \
+            --arg model "$model" \
+            --argjson messages "$messages_json" \
+            --argjson temperature $temperature \
+            --argjson max_tokens $max_tokens \
+            '. + {
+                "model": $model,
+                "messages": $messages,
+                "temperature": $temperature,
+                "max_tokens": $max_tokens
+            }')
+    else
+        set request_body (echo '{}' | jq \
+            --arg model "$model" \
+            --argjson messages "$messages_json" \
+            --argjson temperature $temperature \
+            '. + {
+                "model": $model,
+                "messages": $messages,
+                "temperature": $temperature
+            }')
+    end
 
     set -l response (curl -s -w "\n\nHTTP_CODE:%{http_code}" --max-time 60 \
         https://api.openai.com/v1/chat/completions \
@@ -865,7 +878,7 @@ function ai --description 'AI assistant for Fish Shell'
                 set flag_models true
             case --verbose
                 set flag_models_verbose true
-            case --select select setmodel
+            case --select --setmodel select setmodel
                 set flag_select true
             case --set-model
                 set flag_set_model true
@@ -873,9 +886,9 @@ function ai --description 'AI assistant for Fish Shell'
                 if test $i -le (count $argv)
                     set set_model_value $argv[$i]
                 end
-            case --current-model current
+            case --current-model --current current
                 set flag_current_model true
-            case --refresh-models refresh
+            case --refresh-models --refresh refresh
                 set flag_refresh_models true
             case --fast
                 set model_choice "fast"
@@ -921,7 +934,35 @@ function ai --description 'AI assistant for Fish Shell'
         return 0
     end
 
-    # Флаги работы с моделями
+    if test "$flag_setup" = "true"
+        _ai_display_info "Мастер настройки aiFish"
+        echo ""
+        if not _ai_check_dependencies
+            return 1
+        end
+        if _ai_check_api_key
+            _ai_display_success "API ключ найден"
+        else
+            echo "Получи API ключ на: https://platform.openai.com/api-keys"
+            read -P "Введи API ключ (sk-...): " api_key
+            if test -n "$api_key"
+                set -Ux OPENAI_API_KEY "$api_key"
+                _ai_display_success "API ключ установлен"
+            else
+                _ai_display_error "API ключ не введен"
+                return 1
+            end
+        end
+        _ai_display_success "Настройка завершена! Используй: ai \"твой вопрос\""
+        return 0
+    end
+
+    if test "$flag_clear" = "true"
+        _ai_context_clear
+        return 0
+    end
+
+    # Флаги работы с моделями (обрабатываем ДО проверки запроса)
     if test "$flag_models" = "true"
         if test "$flag_models_verbose" = "true"
             _ai_models_list --verbose
@@ -948,34 +989,6 @@ function ai --description 'AI assistant for Fish Shell'
 
     if test "$flag_refresh_models" = "true"
         _ai_models_refresh_cache
-        return 0
-    end
-
-    if test "$flag_setup" = "true"
-        _ai_display_info "Мастер настройки aiFish"
-        echo ""
-        if not _ai_check_dependencies
-            return 1
-        end
-        if _ai_check_api_key
-            _ai_display_success "API ключ найден"
-        else
-            echo "Получи API ключ на: https://platform.openai.com/api-keys"
-            read -P "Введи API ключ (sk-...): " api_key
-            if test -n "$api_key"
-                set -Ux OPENAI_API_KEY "$api_key"
-                _ai_display_success "API ключ установлен"
-            else
-                _ai_display_error "API ключ не введен"
-                return 1
-            end
-        end
-        _ai_display_success "Настройка завершена! Используй: ai \"твой вопрос\""
-        return 0
-    end
-
-    if test "$flag_clear" = "true"
-        _ai_context_clear
         return 0
     end
 
@@ -1085,6 +1098,27 @@ function ai --description 'AI assistant for Fish Shell'
         else
             # Простой вывод если ничего нет
             command cat $content_file
+        end
+
+        # Статистика ответа
+        echo ""
+        set -l char_count (string length -- "$answer")
+        set -l current_time (date '+%d.%m.%Y %H:%M')
+
+        if type -q lolcat
+            echo "─────────────────────────────────────" | lolcat
+            printf "Модель: %s\n" "$model" | lolcat
+            printf "Токенов: %s\n" "$tokens" | lolcat
+            printf "Символов: %s\n" "$char_count" | lolcat
+            printf "Создан: %s\n" "$current_time" | lolcat
+            echo "─────────────────────────────────────" | lolcat
+        else
+            echo "─────────────────────────────────────"
+            printf "Модель: %s\n" "$model"
+            printf "Токенов: %s\n" "$tokens"
+            printf "Символов: %s\n" "$char_count"
+            printf "Создан: %s\n" "$current_time"
+            echo "─────────────────────────────────────"
         end
     end
 
