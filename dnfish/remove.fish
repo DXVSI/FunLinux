@@ -1,4 +1,9 @@
 function remove --description 'dnf5 remove (with cowsay/cowthink + lolcat)'
+    # Проверка зависимостей при первом запуске
+    if not _dnfish_check_dependencies
+        return 1
+    end
+
     if test (count $argv) -eq 0
         _say "Использование: remove <имя_пакета>" warning
         return 1

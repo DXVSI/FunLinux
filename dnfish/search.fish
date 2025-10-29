@@ -1,4 +1,9 @@
 function search --description 'dnf5 search (with cowsay/cowthink + lolcat)'
+    # Проверка зависимостей при первом запуске
+    if not _dnfish_check_dependencies
+        return 1
+    end
+
     if test (count $argv) -eq 0
         _say "Использование: search <поисковый_запрос>" warning
         return 1

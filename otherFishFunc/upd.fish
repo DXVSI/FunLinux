@@ -1,3 +1,3 @@
 function upd
-    sudo dnf5 update -y $argv
+    sudo dnf update -y $argv
 end
