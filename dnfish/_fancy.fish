@@ -23,6 +23,6 @@ function _fancy --description 'pipe to lolcat if available with color modes'
                 lolcat -h 0.23 -v 0.1
         end
     else
-        cat
+        command cat
     end
 end

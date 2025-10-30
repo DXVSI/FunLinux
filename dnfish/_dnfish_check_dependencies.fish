@@ -35,11 +35,10 @@ function _dnfish_check_dependencies
     read -l response
 
     if test "$response" = "n" -o "$response" = "N"
-        set_color cyan
-        echo "Работаю без украшений (fallback режим)"
+        set_color red
+        echo "Установка зависимостей отклонена. dnfish не может работать без них."
         set_color normal
-        set -g __dnfish_deps_checked 1
-        return 0
+        return 1
     end
 
     # Устанавливаем пакеты
@@ -48,10 +47,13 @@ function _dnfish_check_dependencies
     set_color normal
 
     # Проверяем dnf5 или dnf (только Fedora)
+    set -l install_status 1
     if command -v dnf5 &>/dev/null
         sudo dnf5 install -y $missing_packages
+        set install_status $status
     else if command -v dnf &>/dev/null
         sudo dnf install -y $missing_packages
+        set install_status $status
     else
         set_color red
         echo "Ошибка: dnf5/dnf не найден! dnfish работает только на Fedora."
@@ -59,7 +61,7 @@ function _dnfish_check_dependencies
         return 1
     end
 
-    if test $status -eq 0
+    if test $install_status -eq 0
         set_color green
         echo "Пакеты установлены!"
         set_color normal

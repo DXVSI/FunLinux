@@ -1,5 +1,5 @@
 function search --description 'dnf5 search (with cowsay/cowthink + lolcat)'
-    # Проверка зависимостей при первом запуске
+    # Проверка зависимостей при первом запуске (обязательно!)
     if not _dnfish_check_dependencies
         return 1
     end
