@@ -20,6 +20,10 @@ function _dnfish_check_dependencies
         set -a missing_packages bat
     end
 
+    if not type -q fzf
+        set -a missing_packages fzf
+    end
+
     # Если все пакеты на месте - выходим
     if test (count $missing_packages) -eq 0
         set -g __dnfish_deps_checked 1
