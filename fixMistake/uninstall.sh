@@ -1,79 +1,61 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Скрипт удаления fixMistake
-# Удаляет настройки хоткея и опционально зависимости
+# Удаление fixMistake: сочетание KDE, служба ydotoold и скрипт в ~/.local/bin.
+# Пакеты (ydotool, wl-clipboard, libnotify) не удаляются: их используют и другие программы.
 
-set -e
+set -uo pipefail
 
-echo "=== Удаление fixMistake ==="
-echo ""
+BIN_PATH=$HOME/.local/bin/fixmistake
+UNIT_NAME=fixmistake-ydotoold.service
+UNIT_PATH=$HOME/.config/systemd/user/$UNIT_NAME
+DESKTOP_ID=net.local.fixmistake.desktop
+DESKTOP_PATH=$HOME/.local/share/applications/$DESKTOP_ID
 
-XBINDKEYS_CONFIG="$HOME/.xbindkeysrc"
-AUTOSTART_FILE="$HOME/.config/autostart/xbindkeys.desktop"
-
-# Удаляем конфигурацию хоткея из xbindkeys
-if [ -f "$XBINDKEYS_CONFIG" ]; then
-    echo "Удаление хоткея из $XBINDKEYS_CONFIG..."
-
-    # Создаем временный файл без секции fixMistake
-    grep -v "fixMistake\|fixmistake.sh\|Control+Alt + Right" "$XBINDKEYS_CONFIG" > "${XBINDKEYS_CONFIG}.tmp" || true
-
-    # Заменяем оригинальный файл
-    mv "${XBINDKEYS_CONFIG}.tmp" "$XBINDKEYS_CONFIG"
-
-    echo "Хоткей удален из конфигурации"
+if [[ -t 1 ]]; then
+    REVERSE=$'\e[7m' BOLD=$'\e[1m' GREEN=$'\e[32m' DIM=$'\e[2m' CYAN=$'\e[36m' RESET=$'\e[0m'
 else
-    echo "Файл конфигурации xbindkeys не найден"
+    REVERSE='' BOLD='' GREEN='' DIM='' CYAN='' RESET=''
 fi
 
-# Перезапускаем xbindkeys
-echo "Перезапуск xbindkeys..."
-killall xbindkeys 2>/dev/null || true
-sleep 0.5
+step() { printf '\n%s▸ %s%s\n' "$CYAN$BOLD" "$1" "$RESET"; }
+ok() { printf '  %s✓%s %s\n' "$GREEN" "$RESET" "$1"; }
+skip() { printf '  %s○ %s%s\n' "$DIM" "$1" "$RESET"; }
 
-# Проверяем, остались ли другие хоткеи в конфигурации
-if [ -f "$XBINDKEYS_CONFIG" ] && grep -q '".*"' "$XBINDKEYS_CONFIG"; then
-    # Есть другие хоткеи - перезапускаем xbindkeys
-    xbindkeys &>/dev/null &
-    echo "xbindkeys перезапущен (остались другие хоткеи)"
+printf '\n%s fixMistake %s %sудаление%s\n' "$BOLD$REVERSE" "$RESET" "$BOLD" "$RESET"
+
+step 'Сочетание клавиш'
+if command -v gdbus >/dev/null 2>&1 &&
+    gdbus call --session --dest org.kde.kglobalaccel --object-path /kglobalaccel \
+        --method org.kde.KGlobalAccel.unregister "$DESKTOP_ID" _launch 2>/dev/null | grep -q true; then
+    gdbus call --session --dest org.kde.kglobalaccel \
+        --object-path /component/net_local_fixmistake_desktop \
+        --method org.kde.kglobalaccel.Component.cleanUp >/dev/null 2>&1
+    ok 'снято в KDE'
 else
-    # Нет других хоткеев - не запускаем
-    echo "xbindkeys остановлен (больше нет хоткеев)"
-
-    # Удаляем из автозагрузки если нет других хоткеев
-    if [ -f "$AUTOSTART_FILE" ]; then
-        echo "Удаление xbindkeys из автозагрузки..."
-        rm -f "$AUTOSTART_FILE"
-    fi
+    skip 'в KDE не зарегистрировано'
+fi
+if [[ -f $DESKTOP_PATH ]]; then
+    rm -f "$DESKTOP_PATH"
+    command -v kbuildsycoca6 >/dev/null 2>&1 && kbuildsycoca6 >/dev/null 2>&1
+    ok "удалён $DESKTOP_PATH"
 fi
 
-echo ""
-echo "Удалить зависимости (xdotool, xclip, xbindkeys)?"
-echo "ВНИМАНИЕ: Эти пакеты могут использоваться другими приложениями!"
-echo "ПРИМЕЧАНИЕ: libnotify не удаляется, так как используется системой (KDE Plasma)"
-read -p "Удалить? [y/N]: " remove_deps
-
-if [[ "$remove_deps" =~ ^[Yy]$ ]]; then
-    # Определяем пакетный менеджер
-    if command -v dnf5 &>/dev/null; then
-        PKG_MANAGER="dnf5"
-    elif command -v dnf &>/dev/null; then
-        PKG_MANAGER="dnf"
-    else
-        echo "Ошибка: dnf5/dnf не найден"
-        exit 1
-    fi
-
-    echo "Удаление пакетов..."
-    sudo $PKG_MANAGER remove -y xdotool xclip xbindkeys
-    echo "Пакеты удалены"
+step 'Служба ydotoold'
+if [[ -f $UNIT_PATH ]]; then
+    systemctl --user disable --now "$UNIT_NAME" >/dev/null 2>&1
+    rm -f "$UNIT_PATH"
+    systemctl --user daemon-reload
+    ok "$UNIT_NAME остановлена и удалена"
 else
-    echo "Зависимости оставлены"
+    skip 'не установлена'
 fi
 
-echo ""
-echo "=== Удаление завершено ==="
-echo ""
-echo "fixMistake удален из системы."
-echo "Скрипты в $(dirname "$(readlink -f "$0")") можно удалить вручную."
-echo ""
+step 'Скрипт'
+if [[ -f $BIN_PATH ]]; then
+    rm -f "$BIN_PATH"
+    ok "удалён $BIN_PATH"
+else
+    skip 'не установлен'
+fi
+
+printf '\n%sfixMistake удалён.%s Пакеты ydotool, wl-clipboard и libnotify оставлены.\n\n' "$GREEN$BOLD" "$RESET"
